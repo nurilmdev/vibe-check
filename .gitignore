@@ -1,0 +1,51 @@
+# Environment & Secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Logs & Screenshots
+logs/*.log
+screenshots/*.png
+screenshots/*.jpg
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Playwright
+playwright-report/
+test-results/
+
+token.json
+credentials.json
+
+# macOS
+.DS_Store
+**/.DS_Store
+browser_session_*/
+/emergency_token*
+error_dom_dump.html
+coffeeshops_*.json
+samples_*.json
