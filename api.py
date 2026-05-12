@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import os
 import base64
 from loguru import logger
-from database.repository import get_detail_cafe_by_id, get_top_cafes_by_vibe, fetch_reviews_by_cafe  # Pastikan fungsi ini sudah Anda buat di repository.py
+from database.repository import add_area_to_queue, get_detail_cafe_by_id, get_top_cafes_by_vibe, fetch_reviews_by_cafe  # Pastikan fungsi ini sudah Anda buat di repository.py
 
 # Import fungsi database Anda (sesuaikan dengan nama file/fungsi asli Anda)
 # from repository import get_latest_active_token 
@@ -17,7 +17,8 @@ app = FastAPI(title="Cafe Vibe API", description="API untuk mencari kafe berdasa
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Saat produksi nanti, ganti dengan URL domain asli Frontend Anda
+    allow_origins=["http://localhost:5173", # Untuk tes di laptop
+        "https://vibe-check-app-ten.vercel.app"], # Saat produksi nanti, ganti dengan URL domain asli Frontend Anda
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,16 +68,16 @@ def read_root():
     return {"message": "Selamat datang di Cafe Vibe API!"}
 
 @app.get("/api/cafes")
-def get_top_cafes(vibe: str = None, limit: int = 10):
+def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip: int = 0):
     """
     Mengambil daftar kafe terbaik. Bisa difilter berdasarkan vibe.
     """
     
     if vibe:
-        cafes = get_top_cafes_by_vibe(vibe_tag=vibe, limit=limit)
+        cafes = get_top_cafes_by_vibe(vibe_tag=vibe, location=location, limit=limit, skip=skip)
         logger.info(f"🔍 Mencari kafe dengan vibe '{vibe}'... Ditemukan {len(cafes)} kafe.")
     else:
-        cafes = get_top_cafes_by_vibe(vibe_tag=None, limit=limit)
+        cafes = get_top_cafes_by_vibe(vibe_tag=None, location=location, limit=limit, skip=skip)
         logger.info(f"🔍 Mengambil semua kafe terbaik... Ditemukan {len(cafes)} kafe.")
 
     # RealDictCursor sudah otomatis membuat datanya berbentuk dictionary!
@@ -138,3 +139,23 @@ def get_cafe_reviews(
     except Exception as e:
         # Tangkap error database jika ada yang salah
         raise HTTPException(status_code=500, detail=f"Terjadi kesalahan pada server: {str(e)}")
+    
+class AreaRequest(BaseModel):
+    area_name: str
+
+@app.post("/api/request-area")
+def request_new_area(request: AreaRequest):
+    if not request.area_name.strip():
+        raise HTTPException(status_code=400, detail="Nama area tidak boleh kosong")
+
+    try:
+        # Masukkan ke database dengan prioritas tinggi (karena request dari user)
+        new_job = add_area_to_queue(request.area_name, priority=5)
+        
+        return {
+            "status": "success",
+            "message": f"Area {request.area_name} berhasil dijadwalkan.",
+            "queue_id": new_job['id']
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal memproses request: {str(e)}")

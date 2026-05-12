@@ -19,7 +19,7 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from core.browser import get_page, close_browser, get_page_with_session
 from core.args_parser import parse_args
 from core.logger import setup_logger
-from database.repository import get_list_url, get_reviews_for_shop, simpan_hasil_nlp_ke_database, upsert_shop_profile, upsert_shop_reviews, update_coffeeshop_aggregation
+from database.repository import get_list_url, get_next_queued_job, get_reviews_for_shop, simpan_hasil_nlp_ke_database, update_queue_status, upsert_shop_profile, upsert_shop_reviews, update_coffeeshop_aggregation
 from modules.analysis_sentiment import extract_vibe_with_gemini
 from modules.navigate import navigate_gmaps
 import urllib.parse
@@ -94,7 +94,8 @@ def main():
             logger.success(f"\n✅ Proses selesai. Total data diamankan: {count}")
             
         elif args.scrape_reviews:
-            coffeeshops = get_list_url()
+            sort = args.sort
+            coffeeshops = get_list_url(isHaveReview=False,sort=sort)
             counter = 0
             for shop in coffeeshops:
                 shop_id = shop['id']
@@ -119,7 +120,7 @@ def main():
             logger.info("Memulai proses analisis sentimen ulasan...")
             
             # Ambil daftar coffeeshop id dari database
-            coffeeshops = get_list_url()
+            coffeeshops = get_list_url(isHaveReview=True)
             coffeeshop_ids = [shop['id'] for shop in coffeeshops]
             for shop_id in coffeeshop_ids:
                 logger.info(f"Memproses analisis untuk shop_id: {shop_id}")
@@ -127,13 +128,16 @@ def main():
                 reviews_list = get_reviews_for_shop(shop_id, is_analyzed=False)
 
                 batch_size = 5
+                if not reviews_list:
+                    logger.info(f"Tidak ada ulasan baru untuk dianalisis pada shop_id: {shop_id}. Melewati...")
+                    continue
                 
+                 # --- CATATAN PENTING UNTUK FORMAT DATA ---
                 for i in range(0, len(reviews_list), batch_size):
                     # 1. Potong data menjadi 5 ulasan
                     batch_review = reviews_list[i : i+batch_size]
                     
                     # 2. Kirim ke Gemini (Hasilnya adalah LIST berisi maksimal 5 dict)
-                    # (Pastikan fungsi yang dipanggil adalah fungsi batch yang sudah kita buat)
                     start_time = time.time() # Catat waktu mulai untuk pacing
                     batch_hasil = extract_vibe_with_gemini(batch_review) 
                     
@@ -156,9 +160,40 @@ def main():
                 update_coffeeshop_aggregation(shop_id) # Tandai coffeeshop ini sudah selesai dianalisis setelah semua batch selesai
                 
             logger.info("🎉 Seluruh ulasan untuk coffeeshop ini telah selesai dianalisis!")
-                
+        elif args.scrape_places_queue:
+            logger.info("🚀 Worker Bot sedang mencari antrean...")
             
-
+            job = get_next_queued_job()
+            logger.debug(f"Antrean saat ini: {job}")
+            
+            page = get_page_with_session()  # Pastikan browser hanya dibuka sekali untuk efisiensi
+            if job:
+                job_id = job['id']
+                area = job['area_name']
+                
+                try:
+                    logger.debug(f"🛠️ Sedang memproses: {area}")
+                    update_queue_status(job_id, 'processing')
+                    
+                    navigate_gmaps(page, area)
+                    count = 0
+                    for shop_dict in scrape_with_virtual_scroll(page):
+                        count += 1
+                        shop_uuid = upsert_shop_profile(shop_dict, area)
+                        
+                        if shop_uuid:
+                            logger.success(f"[{count}] 💾 Tersimpan: '{shop_dict.get('name')}' (UUID: {shop_uuid})")
+                        else:
+                            logger.error(f"[{count}] ❌ Gagal simpan: '{shop_dict.get('name')}'.")
+                            
+                    logger.success(f"\n✅ Proses selesai. Total data diamankan: {count}")
+                    
+                    update_queue_status(job_id, 'completed')
+                    logger.success(f"✅ Selesai: {area}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Gagal memproses {area}: {e}")
+                    update_queue_status(job_id, 'failed', error_msg=str(e))
         
     finally:
         if page:

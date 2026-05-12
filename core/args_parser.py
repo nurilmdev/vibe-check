@@ -14,8 +14,18 @@ def parse_args():
         help="Jalankan job scraping ulasan sekali"
     )
     parser.add_argument(
+        "--sort",
+        default="asc",
+        help="Jalankan job scraping ulasan sekali"
+    )
+    parser.add_argument(
         "--analyze-sentiment",
         action="store_true",
         help="Jalankan job analisis sentimen ulasan"
+    )
+    parser.add_argument(
+        "--scrape-places-queue",
+        action="store_true",
+        help="Jalankan job scraping tempat dari antrian"
     )
     return parser.parse_args()

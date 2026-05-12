@@ -5,7 +5,7 @@ from loguru import logger
 from database.connection import get_db
 from psycopg2.extras import execute_values
 
-def upsert_shop_profile(shop_data: dict) -> str | None:
+def upsert_shop_profile(shop_data: dict, location: str) -> str | None:
     """
     Digunakan oleh Worker A. 
     Hanya mengurus profil utama coffeeshop.
@@ -15,9 +15,9 @@ def upsert_shop_profile(shop_data: dict) -> str | None:
         with get_db() as cursor:
             upsert_shop_query = """
                 INSERT INTO coffeeshops 
-                    (name, address, rating, review_count, google_maps_url, image_url, last_scraped_at)
+                    (name, address, rating, review_count, google_maps_url, image_url, location, last_scraped_at)
                 VALUES 
-                    (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT (google_maps_url) 
                 DO UPDATE SET 
                     rating = EXCLUDED.rating,
@@ -31,7 +31,8 @@ def upsert_shop_profile(shop_data: dict) -> str | None:
                 float(shop_data['rating'].replace(',', '.')) if shop_data.get('rating') != "N/A" else None,
                 int(shop_data['reviews'].replace('.', '')) if shop_data.get('reviews') not in ("N/A", None) else 0,
                 shop_data.get('url'),
-                shop_data.get('image_url')
+                shop_data.get('image_url'),
+                location
             ))
             
             result = cursor.fetchone()
@@ -78,11 +79,17 @@ def upsert_shop_reviews(shop_uuid, reviews_list):
     except Exception as e:
         logger.error(f"   ❌ Worker B Database Error: {e}")
         
-def get_list_url() -> list[dict]:
+def get_list_url(isHaveReview: bool, sort="asc") -> list[dict]:
     """Mengambil daftar URL coffeeshop yang sudah tersimpan di database."""
     try:
         with get_db() as cursor:
-            cursor.execute("SELECT id, google_maps_url, name FROM coffeeshops")
+            cursor.execute(f"""SELECT id, google_maps_url, name FROM coffeeshops c
+                               WHERE {"" if isHaveReview else "NOT"} EXISTS (
+                               SELECT 1 
+                               FROM coffeeshop_reviews r 
+                               WHERE r.coffeeshop_id = c.id
+                               {"ORDER BY c.last_scraped_at DESC" if sort=="desc" else ""} 
+                            )""")
             urls = [{'id': row['id'], 'url': row['google_maps_url'], 'name': row['name']} for row in cursor.fetchall()]
             logger.info(f"   🔍 Database: Ditemukan {len(urls)} URL coffeeshop yang sudah tersimpan.")
             return urls
@@ -188,31 +195,45 @@ def update_coffeeshop_aggregation(shop_uuid):
     except Exception as e:
         print(f"❌ Error saat melakukan agregasi data kafe: {e}")
         
-def get_top_cafes_by_vibe(vibe_tag, limit=10):
+def get_top_cafes_by_vibe(vibe_tag: str = None, location: str = None, limit: int = 10, skip: int = 0):
     """
     Mengambil daftar kafe terbaik berdasarkan tag vibe tertentu.
     Hasilnya diurutkan berdasarkan sentimen tertinggi.
     """
     try:
         with get_db() as cursor:
+            params = []
+            # Dasar Query
             query = """
-                SELECT id, name, rating, sentiment_analytics, vibe_tags 
+                SELECT id, name, rating, sentiment_analytics, vibe_tags, image_url, google_maps_url, location 
                 FROM coffeeshops 
-                WHERE array_to_string(vibe_tags, ', ') ILIKE %s
-                ORDER BY sentiment_analytics DESC NULLS LAST
-                LIMIT %s;
+                WHERE 1=1
             """
             
-            search_pattern = f"%{vibe_tag if vibe_tag else ''}%"
+            # Jika user mengisi Vibe
+            if vibe_tag:
+                query += " AND array_to_string(vibe_tags, ', ') ILIKE %s"
+                params.append(f"%{vibe_tag}%")
+                
+            # Jika user mengisi Lokasi/Kota
+            if location:
+                # Sesuaikan "city" dengan nama kolom lokasi di database Anda (bisa alamat atau area_name)
+                query += " AND location ILIKE %s" 
+                params.append(f"%{location}%")
+                
+            # Urutan dan Paginasi
+            query += " ORDER BY sentiment_analytics DESC NULLS LAST LIMIT %s OFFSET %s;"
+            params.extend([limit, skip])
             
-            cursor.execute(query, (search_pattern, limit))
+            cursor.execute(query, tuple(params))    
             raw_sql = cursor.query.decode('utf-8')
-            
+                
             logger.debug(f"\n🔍 [DEBUG] Raw SQL dieksekusi:\n{raw_sql}\n")
-            
+                
             cafes = cursor.fetchall()
             logger.debug(f"📊 [DEBUG] Ditemukan {len(cafes)} baris data.")
             return cafes
+        
     except Exception as e:
         logger.error(f"❌ Error saat mengambil kafe berdasarkan vibe: {e}")
         return []
@@ -288,3 +309,60 @@ def fetch_reviews_by_cafe(
         raw_sql = cursor.query.decode('utf-8')
         logger.debug(f"\n🔍 [DEBUG] Raw SQL dieksekusi:\n{raw_sql}\n")
         return cursor.fetchall()
+
+def add_area_to_queue(area_name: str, priority: int = 1):
+    """
+    Menambahkan area ke antrean scraping.
+    """
+    with get_db() as cursor:
+        query = """
+            INSERT INTO scrape_queue (area_name, priority, status, requested_at, total_requested)
+            VALUES (%s, %s, 'pending', %s, 1)
+            ON CONFLICT (area_name) 
+            DO UPDATE SET 
+                total_requested = scrape_queue.total_requested + 1,
+                -- Skema Prioritas: total_requested dikali bobot (misal: 10)
+                priority = (scrape_queue.total_requested + 1) * 10,
+                -- Jika status sebelumnya 'failed', kembalikan ke 'pending' agar di-scrape ulang
+                status = CASE 
+                            WHEN scrape_queue.status = 'failed' THEN 'pending' 
+                            ELSE scrape_queue.status 
+                         END,
+                requested_at = CURRENT_TIMESTAMP
+            RETURNING id, total_requested, priority;
+        """
+        cursor.execute(query, (area_name, priority, datetime.now()))
+        return cursor.fetchone()
+    
+def get_next_queued_job():
+    """
+    Diambil oleh Worker: Mencari area 'pending' dengan prioritas tertinggi.
+    Menggunakan 'FOR UPDATE SKIP LOCKED' agar jika Anda punya 2 bot, 
+    mereka tidak mengambil area yang sama.
+    """
+    with get_db() as cursor:
+        query = """
+            SELECT id, area_name 
+            FROM scrape_queue 
+            WHERE status = 'pending' 
+            ORDER BY priority DESC
+            LIMIT 1 
+            FOR UPDATE SKIP LOCKED;
+        """
+        cursor.execute(query)
+        return cursor.fetchone()
+    
+def update_queue_status(queue_id: str, status: str, error_msg: str = None):
+    """
+    Mengupdate status (processing, completed, failed)
+    """
+    with get_db() as cursor:
+        if status == 'processing':
+            query = "UPDATE scrape_queue SET status = %s, started_at = %s WHERE id = %s"
+            cursor.execute(query, (status, datetime.now(), queue_id))
+        elif status == 'completed':
+            query = "UPDATE scrape_queue SET status = %s, completed_at = %s WHERE id = %s"
+            cursor.execute(query, (status, datetime.now(), queue_id))
+        elif status == 'failed':
+            query = "UPDATE scrape_queue SET status = %s, last_error = %s WHERE id = %s"
+            cursor.execute(query, (status, error_msg, queue_id))

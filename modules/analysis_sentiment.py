@@ -2,13 +2,13 @@ import json
 from google import genai
 from google.genai import types
 import time
-from loguru import logger  
+from loguru import logger
+from config import settings  
 
 # 1. Inisialisasi Client
 # Ganti dengan API Key milikmu
-API_KEY_GEMINI = "AIzaSyAtrodUwS-GOrN5i8rhd9NQmYIdPbyfin0"
-API_KEY_GEMINI_ALT = "AQ.Ab8RN6InmKx3JgfzQcDLmZ5kP6tamqo2mmZzfIVH6HHYJ545nA"  # Cadangan jika yang utama kena rate limit
-client = genai.Client(api_key=API_KEY_GEMINI_ALT)
+
+client = genai.Client(api_key=settings.API_KEY_GEMINI)
 
 def extract_vibe_with_gemini(reviews_list):
     # 2. System Instruction (Persona & Rules)
@@ -23,6 +23,7 @@ def extract_vibe_with_gemini(reviews_list):
     4. "Family Friendly": luas, cocok untuk keluarga, ramah anak, tidak ramai, tidak banyak asap rokok.
     5. "Hidden Gem": masuk gang, sulit dicari, tapi tempat/kopinya bagus.
     6. "Kopi Enak": kopinya enak, rekomen buat yang suka ngopi, creamy, strong, bold, arabica, robusta.
+    7. "Pet friendly": boleh bawa hewan peliharaan, ada fasilitas untuk hewan, ramah hewan, ada kucing/anjing lucu.
     
     FORMAT OUTPUT WAJIB:
     Anda harus mengembalikan sebuah ARRAY dari JSON Objects. 
@@ -56,6 +57,7 @@ def extract_vibe_with_gemini(reviews_list):
             # 3. Panggil API
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
+                # model='gemini-3.1-flash',
                 contents=combined_text,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
@@ -75,7 +77,10 @@ def extract_vibe_with_gemini(reviews_list):
             if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                 print("⚠️ [Peringatan 429] Kuota menit ini habis! Mesin istirahat selama 65 detik...")
                 # Tidur 65 detik untuk memastikan menit benar-benar berganti
-                time.sleep(65) 
+                time.sleep(65)
+                
+                # ganti token
+                # client = genai.Client(api_key=generate 
                 
             # --- PENANGANAN ERROR 503 (SERVER GOOGLE SIBUK) ---
             elif "503" in error_msg:

@@ -15,8 +15,6 @@ ATLASSIAN_EMAIL        = get("ATLASSIAN_EMAIL", required=True)
 ATLASSIAN_PASSWORD     = get("ATLASSIAN_PASSWORD", required=True)
 ATLASSIAN_TOTP_SECRET  = get("ATLASSIAN_TOTP_SECRET", default=None)
 
-BASE_TOKEN_NAME        = get("BASE_TOKEN_NAME", required=True)
-
 # --- URLs ---
 ATLASSIAN_ADMIN_URL    = get("ATLASSIAN_ADMIN_URL", default="https://admin.atlassian.com")
 ATLASSIAN_TOKEN_URL    = get("ATLASSIAN_TOKEN_URL", default="https://id.atlassian.com/manage-profile/security/api-tokens")
@@ -34,6 +32,8 @@ TOKEN_RENEWAL_THRESHOLD_DAYS = int(get("TOKEN_RENEWAL_THRESHOLD_DAYS", default="
 
 # --- Logging ---
 LOG_LEVEL              = get("LOG_LEVEL", default="DEBUG")
+
+API_KEY_GEMINI          = get("API_KEY_GEMINI")
 
 # --- Database ---
 DB_HOST     = get("DB_HOST", default="localhost")

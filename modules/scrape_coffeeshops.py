@@ -104,12 +104,12 @@ def scrape_with_virtual_scroll(page: Page, feed_selector="div[role='feed']"):
                     counter += 1
                     yield shop_data
                     print(f"✅ {name} | ⭐ {rating_score} ({review_count})")
-                if counter == 5:
+                if counter == 15:
                     beres = True
                     break
         logger.info(f"Jumlah coffeeshop unik yang ditemukan sejauh ini: {counter}")        
         if beres:
-            print("\n⚠️ Target 5 coffeeshop tercapai, menghentikan scroll.")
+            print("\n⚠️ Target 15 coffeeshop tercapai, menghentikan scroll.")
             break
 
         # Injeksi JS untuk scroll down
