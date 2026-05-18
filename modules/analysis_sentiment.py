@@ -75,7 +75,7 @@ def extract_vibe_with_gemini(reviews_list):
             
             # --- PENANGANAN KHUSUS ERROR 429 (RATE LIMIT) ---
             if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                print("⚠️ [Peringatan 429] Kuota menit ini habis! Mesin istirahat selama 65 detik...")
+                logger.warning("⚠️ [Peringatan 429] Kuota menit ini habis! Mesin istirahat selama 65 detik...")
                 # Tidur 65 detik untuk memastikan menit benar-benar berganti
                 time.sleep(65)
                 
@@ -85,11 +85,11 @@ def extract_vibe_with_gemini(reviews_list):
             # --- PENANGANAN ERROR 503 (SERVER GOOGLE SIBUK) ---
             elif "503" in error_msg:
                 wait_time = 2 ** (attempt + 1)
-                print(f"⚠️ Server sibuk (503). Menunggu {wait_time} detik...")
+                logger.warning(f"⚠️ Server sibuk (503). Menunggu {wait_time} detik...")
                 time.sleep(wait_time)
                 
             else:
-                print(f"❌ Error fatal API: {e}")
+                logger.error(f"❌ Error fatal API: {e}")
                 return None
     logger.warning("🛑 Gagal memanggil API setelah batas maksimal percobaan. Batch ini dilewati.")
     

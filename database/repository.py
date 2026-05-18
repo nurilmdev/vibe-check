@@ -74,7 +74,7 @@ def upsert_shop_reviews(shop_uuid, reviews_list):
             """
             
             execute_values(cursor, upsert_review_query, reviews_to_insert)
-            print(f"   💾 Worker B: Berhasil memproses {len(reviews_to_insert)} ulasan ke database.")
+            logger.info(f"   💾 Worker B: Berhasil memproses {len(reviews_to_insert)} ulasan ke database.")
 
     except Exception as e:
         logger.error(f"   ❌ Worker B Database Error: {e}")
@@ -139,10 +139,10 @@ def simpan_hasil_nlp_ke_database(nlp_result):
                 nlp_result.get('review_id')
             ))
             
-            print(f"✅ Berhasil mengupdate NLP untuk review_id: {nlp_result.get('review_id')[:10]}...")
+            logger.info(f"✅ Berhasil mengupdate NLP untuk review_id: {nlp_result.get('review_id')[:10]}...")
 
     except Exception as e:
-        print(f"❌ Database Error saat update NLP: {e}")
+        logger.info(f"❌ Database Error saat update NLP: {e}")
             
 def update_coffeeshop_aggregation(shop_uuid):
     """
@@ -190,10 +190,10 @@ def update_coffeeshop_aggregation(shop_uuid):
             # Kita melempar shop_uuid 3 kali karena dibutuhkan di klausa WHERE pada CTE di atas
             cursor.execute(aggregation_query, (shop_uuid, shop_uuid, shop_uuid))
             
-            print(f"🔄 Berhasil menghitung ulang (Aggregate) metrik untuk ID Kafe: {shop_uuid}")
+            logger.info(f"🔄 Berhasil menghitung ulang (Aggregate) metrik untuk ID Kafe: {shop_uuid}")
 
     except Exception as e:
-        print(f"❌ Error saat melakukan agregasi data kafe: {e}")
+        logger.info(f"❌ Error saat melakukan agregasi data kafe: {e}")
         
 def get_top_cafes_by_vibe(vibe_tag: str = None, location: str = None, limit: int = 10, skip: int = 0):
     """
@@ -303,7 +303,7 @@ def fetch_reviews_by_cafe(
         params.extend([limit, offset])
         
         # Debugging: Cetak Raw SQL yang terbentuk
-        # print("🔮 SQL:", cursor.mogrify(query, tuple(params)).decode('utf-8'))
+        # logger.info("🔮 SQL:", cursor.mogrify(query, tuple(params)).decode('utf-8'))
         
         cursor.execute(query, tuple(params))
         raw_sql = cursor.query.decode('utf-8')
