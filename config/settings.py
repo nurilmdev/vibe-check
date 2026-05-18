@@ -34,6 +34,8 @@ TOKEN_RENEWAL_THRESHOLD_DAYS = int(get("TOKEN_RENEWAL_THRESHOLD_DAYS", default="
 LOG_LEVEL              = get("LOG_LEVEL", default="DEBUG")
 
 API_KEY_GEMINI          = get("API_KEY_GEMINI")
+API_KEY_GEMINI_MAIN     = get("API_KEY_GEMINI_MAIN")
+API_KEY_GEMINI_ALT      = get("API_KEY_GEMINI_ALT")
 
 # --- Database ---
 DB_HOST     = get("DB_HOST", default="localhost")
