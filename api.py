@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Security
+from fastapi import FastAPI, HTTPException, Query, Request, Security
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
@@ -10,10 +10,21 @@ import base64
 from loguru import logger
 from database.repository import add_area_to_queue, get_detail_cafe_by_id, get_top_cafes_by_vibe, fetch_reviews_by_cafe  # Pastikan fungsi ini sudah Anda buat di repository.py
 
+# --- RATE LIMITING (slowapi) ---
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
+
 # Import fungsi database Anda (sesuaikan dengan nama file/fungsi asli Anda)
 # from repository import get_latest_active_token 
 
 app = FastAPI(title="Cafe Vibe API", description="API untuk mencari kafe berdasarkan Vibe dan Sentimen")
+
+# Attach limiter to app state & register exception handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,8 +56,9 @@ class TokenResponse(BaseModel):
 
 # --- ENDPOINT UTAMA ---
 @app.get("/api/token/latest", response_model=TokenResponse, tags=["Token"])
-async def get_token(api_key: str = Security(get_api_key)):
+async def get_token(request: Request, api_key: str = Security(get_api_key)):
     """Mengambil token Atlassian terbaru yang masih aktif dari Database."""
+    logger.debug("📡 [GET /api/token/latest] Request dari IP: {}", request.client.host)
     
     try:
         data = get_latest_active_token()
@@ -64,14 +76,17 @@ async def get_token(api_key: str = Security(get_api_key)):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
 @app.get("/")
-def read_root(api_key: str = Security(get_api_key)):
+def read_root(request: Request, api_key: str = Security(get_api_key)):
+    logger.debug("📡 [GET /] Request dari IP: {}", request.client.host)
     return {"message": "Selamat datang di Cafe Vibe API!"}
 
 @app.get("/api/cafes")
-def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip: int = 0, api_key: str = Security(get_api_key)):
+@limiter.limit("30/minute")
+def get_top_cafes(request: Request, vibe: str = None, location: str = None, limit: int = 10, skip: int = 0, api_key: str = Security(get_api_key)):
     """
     Mengambil daftar kafe terbaik. Bisa difilter berdasarkan vibe.
     """
+    logger.debug("📡 [GET /api/cafes] Request dari IP: {}", request.client.host)
     
     if vibe:
         cafes = get_top_cafes_by_vibe(vibe_tag=vibe, location=location, limit=limit, skip=skip)
@@ -84,10 +99,11 @@ def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip:
     return {"status": "success", "data": cafes}
 
 @app.get("/api/cafes/{shop_id}")
-def get_cafe_detail(shop_id: str, api_key: str = Security(get_api_key)):
+def get_cafe_detail(request: Request, shop_id: str, api_key: str = Security(get_api_key)):
     """
     Mengambil detail lengkap sebuah kafe berdasarkan ID-nya.
     """
+    logger.debug("📡 [GET /api/cafes/{}] Request dari IP: {}", shop_id, request.client.host)
     cafe_detail = get_detail_cafe_by_id(shop_id)
     if not cafe_detail:
         raise HTTPException(status_code=404, detail="Kafe tidak ditemukan.")
@@ -95,6 +111,7 @@ def get_cafe_detail(shop_id: str, api_key: str = Security(get_api_key)):
 
 @app.get("/api/cafes/{cafe_uuid}/reviews")
 def get_cafe_reviews(
+    request: Request,
     cafe_uuid: str,
     aspect: Optional[str] = Query(None, description="Pilih: fasilitas_kerja, kopi_dan_makanan, suasana"),
     sentiment: Optional[str] = Query(None, description="Pilih: positif, negatif, netral"),
@@ -106,6 +123,7 @@ def get_cafe_reviews(
     Mengambil daftar ulasan untuk satu kafe. 
     Fitur Canggih: Bisa mencari ulasan yang spesifik memuji/mengkritik aspek tertentu!
     """
+    logger.debug("📡 [GET /api/cafes/{}/reviews] Request dari IP: {}", cafe_uuid, request.client.host)
     # Validasi logika ringan: Jika isi aspect, harus isi sentiment juga
     if (aspect and not sentiment):
         raise HTTPException(
@@ -145,17 +163,19 @@ class AreaRequest(BaseModel):
     area_name: str
 
 @app.post("/api/request-area")
-def request_new_area(request: AreaRequest, api_key: str = Security(get_api_key)):
-    if not request.area_name.strip():
+@limiter.limit("5/minute")
+def request_new_area(request: Request, body: AreaRequest, api_key: str = Security(get_api_key)):
+    logger.debug("📡 [POST /api/request-area] Request dari IP: {} | area: {}", request.client.host, body.area_name)
+    if not body.area_name.strip():
         raise HTTPException(status_code=400, detail="Nama area tidak boleh kosong")
 
     try:
         # Masukkan ke database dengan prioritas tinggi (karena request dari user)
-        new_job = add_area_to_queue(request.area_name, priority=5)
+        new_job = add_area_to_queue(body.area_name, priority=5)
         
         return {
             "status": "success",
-            "message": f"Area {request.area_name} berhasil dijadwalkan.",
+            "message": f"Area {body.area_name} berhasil dijadwalkan.",
             "queue_id": new_job['id']
         }
     except Exception as e:
