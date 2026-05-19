@@ -205,7 +205,7 @@ def get_top_cafes_by_vibe(vibe_tag: str = None, location: str = None, limit: int
             params = []
             # Dasar Query
             query = """
-                SELECT id, name, rating, sentiment_analytics, vibe_tags, image_url, google_maps_url, location 
+                SELECT id, name, rating, sentiment_analytics, vibe_tags, image_url, google_maps_url, location, total_reviews_gmaps 
                 FROM coffeeshops 
                 WHERE 1=1
             """
