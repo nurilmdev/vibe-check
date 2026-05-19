@@ -64,11 +64,11 @@ async def get_token(api_key: str = Security(get_api_key)):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
 @app.get("/")
-def read_root():
+def read_root(api_key: str = Security(get_api_key)):
     return {"message": "Selamat datang di Cafe Vibe API!"}
 
 @app.get("/api/cafes")
-def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip: int = 0):
+def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip: int = 0, api_key: str = Security(get_api_key)):
     """
     Mengambil daftar kafe terbaik. Bisa difilter berdasarkan vibe.
     """
@@ -84,7 +84,7 @@ def get_top_cafes(vibe: str = None, location: str = None, limit: int = 10, skip:
     return {"status": "success", "data": cafes}
 
 @app.get("/api/cafes/{shop_id}")
-def get_cafe_detail(shop_id: str):
+def get_cafe_detail(shop_id: str, api_key: str = Security(get_api_key)):
     """
     Mengambil detail lengkap sebuah kafe berdasarkan ID-nya.
     """
@@ -99,7 +99,8 @@ def get_cafe_reviews(
     aspect: Optional[str] = Query(None, description="Pilih: fasilitas_kerja, kopi_dan_makanan, suasana"),
     sentiment: Optional[str] = Query(None, description="Pilih: positif, negatif, netral"),
     limit: int = Query(10, ge=1, le=50, description="Maksimal ulasan per halaman (Max 50)"),
-    skip: int = Query(0, ge=0, description="Jumlah data yang dilewati (untuk pagination)")
+    skip: int = Query(0, ge=0, description="Jumlah data yang dilewati (untuk pagination)"),
+    api_key: str = Security(get_api_key)
 ):
     """
     Mengambil daftar ulasan untuk satu kafe. 
@@ -144,7 +145,7 @@ class AreaRequest(BaseModel):
     area_name: str
 
 @app.post("/api/request-area")
-def request_new_area(request: AreaRequest):
+def request_new_area(request: AreaRequest, api_key: str = Security(get_api_key)):
     if not request.area_name.strip():
         raise HTTPException(status_code=400, detail="Nama area tidak boleh kosong")
 
