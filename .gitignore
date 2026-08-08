@@ -49,3 +49,8 @@ browser_session_*/
 error_dom_dump.html
 coffeeshops_*.json
 samples_*.json
+
+# UMKM FnB Pipeline — generated CSV leads
+raw_umkm_leads.csv
+clean_umkm_bandung.csv
+scrape_progress.txt

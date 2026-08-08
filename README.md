@@ -88,6 +88,43 @@ python main.py --schedule
 4. Perhatikan atribut `data-testid`, `id`, atau `class` pada elemen tersebut
 5. Update selector di file module yang sesuai
 
+## 🍜 Pipeline UMKM FnB Bandung (CSV-only, tanpa database)
+
+Pipeline ETL terpisah (branch `fnb-umkm-crawl`) untuk mengumpulkan leads UMKM Food & Beverage di Bandung. **Tidak menggunakan PostgreSQL** — output murni file CSV.
+
+### Phase 1 — Extract (scraping leads mentah)
+
+**Full crawl — Query Multiplier** (29 keyword F&B viral × 39 area Bandung Raya = 1.131 query):
+
+```bash
+venv\Scripts\python -m modules.scrape_umkm_multiplier                                        # full crawl (auto-resume)
+venv\Scripts\python -m modules.scrape_umkm_multiplier --max-queries 2 --max-per-query 3      # smoke test
+venv\Scripts\python -m modules.scrape_umkm_multiplier --fresh                                # mulai dari nol
+```
+
+- Job berjalan puluhan jam: progress tersimpan di `scrape_progress.txt` — aman di-stop, jalankan lagi untuk resume (query selesai di-skip, URL duplikat di-skip)
+- Guard anti-blokir: deteksi CAPTCHA → cooldown 10–20 menit → restart session → retry 1×; jika tetap terblokir, run berhenti rapi (tinggal resume). Browser auto-restart tiap 100 query selesai
+- Setiap record langsung disimpan real-time (append) ke `raw_umkm_leads.csv`, dengan random delay 2–5 detik antar aksi
+- Kolom: `Name, Category, Reviews_Count, Phone_Number, Website_URL, Google_Maps_URL, Source_Query`
+
+Versi ringkas 4-query (smoke test cepat):
+
+```bash
+venv\Scripts\python -m modules.scrape_umkm                      # 4 query umum
+venv\Scripts\python -m modules.scrape_umkm --max-per-query 10   # tes cepat
+```
+
+### Phase 2 — Transform & Load (filter heuristik)
+
+```bash
+venv\Scripts\python filter_umkm_leads.py
+```
+
+Tahapan: dedup baris berdasarkan `Name`, lalu baris hanya lolos jika memenuhi SEMUA aturan: bukan kopi/kafe, `1 <= Reviews_Count <= 1000`, nomor HP berawalan `08`/`+628` (target WhatsApp), dan website mengandung `instagram.com`/`linktr.ee`. Hasilnya disimpan ke `clean_umkm_bandung.csv`.
+
+---
+
+
 ## 🧪 Menjalankan API
 
 Pastikan `INTERNAL_API_KEY` pada file `.env` sudah ada dan terisi.

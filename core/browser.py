@@ -6,6 +6,7 @@ from config import settings
 
 _playwright_instance = None
 _browser: Browser = None
+_session_playwright = None  # driver Playwright milik get_page_with_session()
 
 
 def get_browser() -> Browser:
@@ -56,15 +57,16 @@ def get_page() -> Page:
     return page
 def get_page_with_session():
     """Membuat browser dengan session yang tersimpan di lokal."""
+    global _session_playwright
     # Tentukan lokasi folder session (jangan lupa masukkan folder ini ke .gitignore)
     user_data_dir = os.path.join(os.getcwd(), "browser_session_gmaps")
     logger.info("Launching browser with user data dir: {}", user_data_dir)
-    pw = sync_playwright().start()
+    _session_playwright = sync_playwright().start()
     
     windows_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     
     # 1. Launch Browser sekaligus Context
-    context = pw.chromium.launch_persistent_context(
+    context = _session_playwright.chromium.launch_persistent_context(
         user_data_dir=user_data_dir,
         headless=settings.HEADLESS,
         user_agent=windows_user_agent,
@@ -80,6 +82,22 @@ def get_page_with_session():
         page = context.new_page()
         
     return page
+
+
+def close_session_browser():
+    """
+    Tutup browser persistent-session (milik get_page_with_session) beserta driver
+    Playwright-nya. Dipakai untuk restart browser di tengah run panjang
+    (memory hygiene / pemulihan CAPTCHA). Aman dipanggil walau belum ada session.
+    """
+    global _session_playwright
+    if _session_playwright is not None:
+        try:
+            _session_playwright.stop()  # menghentikan driver sekaligus menutup context & browser-nya
+            logger.info("Session browser closed.")
+        except Exception as e:
+            logger.debug(f"Error saat menutup session browser: {e}")
+        _session_playwright = None
 
 
 def close_browser():
