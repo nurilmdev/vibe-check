@@ -70,7 +70,13 @@ def get_page_with_session():
         user_data_dir=user_data_dir,
         headless=settings.HEADLESS,
         user_agent=windows_user_agent,
-        args=["--disable-blink-features=AutomationControlled"]
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            # Anti-suspend: cegah Windows/Chromium men-suspend proses background
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-background-timer-throttling",
+        ]
     )
     
     context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")

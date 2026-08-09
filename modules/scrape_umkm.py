@@ -149,7 +149,7 @@ def extract_place_contacts(page: Page, place_url: str) -> dict:
     """
     contacts = {"Phone_Number": "", "Website_URL": ""}
     try:
-        page.goto(place_url, wait_until="domcontentloaded", timeout=60_000)
+        page.goto(place_url, wait_until="domcontentloaded", timeout=120_000)  # 2 menit: toleran rate-limit
         page.wait_for_timeout(2500)  # beri waktu panel detail merender info kontak
     except Exception as e:
         logger.warning(f"⚠️ Gagal membuka halaman detail ({place_url}): {e}")

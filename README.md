@@ -103,7 +103,7 @@ venv\Scripts\python -m modules.scrape_umkm_multiplier --fresh                   
 ```
 
 - Job berjalan puluhan jam: progress tersimpan di `scrape_progress.txt` — aman di-stop, jalankan lagi untuk resume (query selesai di-skip, URL duplikat di-skip)
-- Guard anti-blokir: deteksi CAPTCHA → cooldown 10–20 menit → restart session → retry 1×; jika tetap terblokir, run berhenti rapi (tinggal resume). Browser auto-restart tiap 100 query selesai
+- Guard anti-blokir: deteksi CAPTCHA/consent wall → cooldown berjenjang 10–60 menit per episode → restart session → retry; jika tidak pulih setelah 3 episode, run berhenti rapi (tinggal resume). Browser auto-restart tiap 100 query selesai. Screenshot bukti kegagalan navigasi tersimpan di `screenshots/`
 - Setiap record langsung disimpan real-time (append) ke `raw_umkm_leads.csv`, dengan random delay 2–5 detik antar aksi
 - Kolom: `Name, Category, Reviews_Count, Phone_Number, Website_URL, Google_Maps_URL, Source_Query`
 

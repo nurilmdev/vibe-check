@@ -26,12 +26,18 @@ Jalankan dari root project:
 import argparse
 import csv
 import os
+import re
 
 from loguru import logger
 
 COFFEE_KEYWORDS = ["kopi", "coffee", "cafe", "roastery", "kopitiam"]
 WHATSAPP_PREFIXES = ("08", "+628")
 INSTAGRAM_DOMAINS = ("instagram.com", "linktr.ee")
+
+# Greater Bandung Raya bounding box (kota + Cimahi + Kab. Bandung/Barat).
+# Baris dengan koordinat di luar box ini (mis. Jakarta) dibuang.
+BANDUNG_LAT_RANGE = (-7.15, -6.75)
+BANDUNG_LNG_RANGE = (107.35, 107.75)
 
 DEFAULT_INPUT = "raw_umkm_leads.csv"
 DEFAULT_OUTPUT = "clean_umkm_bandung.csv"
@@ -88,6 +94,33 @@ def is_instagram_target(website_url: str) -> bool:
     return bool(url) and any(domain in url for domain in INSTAGRAM_DOMAINS)
 
 
+def extract_coords_from_url(url: str):
+    """Ambil (lat, lng) dari pola '!3d<lat>!4d<lng>' pada Google_Maps_URL."""
+    if not url:
+        return None
+    m = re.search(r"!3d(-?[0-9.]+)!4d(-?[0-9.]+)", url)
+    if not m:
+        return None
+    try:
+        return float(m.group(1)), float(m.group(2))
+    except (TypeError, ValueError):
+        return None
+
+
+def is_in_bandung(url: str) -> bool:
+    """
+    True jika koordinat pada URL berada di dalam bounding box Bandung Raya.
+    Jika koordinat tidak ter-parse, kembalikan True (jangan buang data yang
+    tidak bisa diverifikasi - biarkan aturan lain yang menilai).
+    """
+    coords = extract_coords_from_url(url)
+    if coords is None:
+        return True
+    lat, lng = coords
+    return (BANDUNG_LAT_RANGE[0] <= lat <= BANDUNG_LAT_RANGE[1]
+            and BANDUNG_LNG_RANGE[0] <= lng <= BANDUNG_LNG_RANGE[1])
+
+
 def evaluate_row(row: dict) -> dict:
     """Evaluasi seluruh aturan untuk satu baris. Return dict hasil per aturan."""
     return {
@@ -95,6 +128,7 @@ def evaluate_row(row: dict) -> dict:
         "msme_scale": is_msme_scale(parse_reviews_count(row.get("Reviews_Count"))),
         "whatsapp_target": is_whatsapp_target(row.get("Phone_Number", "")),
         "instagram_target": is_instagram_target(row.get("Website_URL", "")),
+        "in_bandung": is_in_bandung(row.get("Google_Maps_URL", "")),
     }
 
 
@@ -114,6 +148,7 @@ def apply_heuristic_filters(rows: list) -> tuple:
         "not_msme_scale": 0,
         "no_whatsapp_number": 0,
         "no_instagram_website": 0,
+        "outside_bandung": 0,
     }
 
     for row in rows:
@@ -130,6 +165,8 @@ def apply_heuristic_filters(rows: list) -> tuple:
             rejection_stats["no_whatsapp_number"] += 1
         if not result["instagram_target"]:
             rejection_stats["no_instagram_website"] += 1
+        if not result["in_bandung"]:
+            rejection_stats["outside_bandung"] += 1
 
     return passed, rejection_stats
 
@@ -176,6 +213,7 @@ def main():
     logger.info(f"❌ Ditolak - skala review    : {stats['not_msme_scale']}")
     logger.info(f"❌ Ditolak - tanpa no. WA    : {stats['no_whatsapp_number']}")
     logger.info(f"❌ Ditolak - tanpa IG/linktree: {stats['no_instagram_website']}")
+    logger.info(f"[X] Ditolak - di luar Bandung   : {stats['outside_bandung']}")
     logger.success(f"✅ Lolos SEMUA aturan        : {len(passed)} baris → {args.output}")
 
 
