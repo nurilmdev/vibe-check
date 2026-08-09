@@ -243,8 +243,8 @@ def navigate_with_guard(page, query: str, nav_state: dict):
         except PageCorruptedError as pce:
             # Objek page rusak (renderer crash) -> session tidak bisa dipakai lagi.
             # Restart session SEKARANG dan retry query yang sama dengan page baru.
-            logger.warning(f"[page-rusak] {pce}. Restart session browser lalu retry query...")
-            close_session_browser()
+            logger.warning(f"[page-rusak] {pce}. Force-kill session browser lalu retry query...")
+            close_session_browser(force_kill=True)
             human_delay()
             page = get_page_with_session()
             nav_state["failures"] = 0
@@ -466,8 +466,8 @@ def run_extraction(output_file=RAW_OUTPUT_FILE, max_per_query=None, max_queries=
                     except PageCorruptedError as pce:
                         # Page rusak (renderer crash) -> restart session SEKARANG,
                         # jangan lanjut dengan page yang rusak (akan hang selamanya).
-                        logger.error(f"[page-rusak] Gagal memproses '{card.get('name')}': {pce}. Restart session...")
-                        close_session_browser()
+                        logger.error(f"[page-rusak] Gagal memproses '{card.get('name')}': {pce}. Force-kill session...")
+                        close_session_browser(force_kill=True)
                         human_delay()
                         page = get_page_with_session()
                         wd_state.touch()

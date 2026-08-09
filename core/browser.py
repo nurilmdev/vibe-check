@@ -96,16 +96,35 @@ def get_page_with_session():
     return page
 
 
-def close_session_browser():
+def close_session_browser(force_kill: bool = False):
     """
     Tutup browser persistent-session (milik get_page_with_session) beserta driver
     Playwright-nya. Dipakai untuk restart browser di tengah run panjang
     (memory hygiene / pemulihan CAPTCHA). Aman dipanggil walau belum ada session.
+
+    Args:
+        force_kill: Jika True, langsung kill proses Chromium tanpa graceful stop
+                    (digunakan saat page rusak/crash — graceful stop akan hang).
     """
     global _session_playwright
     if _session_playwright is not None:
         try:
-            _session_playwright.stop()  # menghentikan driver sekaligus menutup context & browser-nya
+            if force_kill:
+                # Force-kill: Chromium rusak tidak merespons graceful stop
+                logger.info("Force-killing session browser process...")
+                try:
+                    # Coba kill via Playwright internal (jika masih bisa)
+                    _session_playwright._impl_obj._connection._transport._process.kill()
+                except Exception:
+                    pass
+                # Fallback: kill semua proses chrome yang terkait session ini
+                try:
+                    import subprocess
+                    subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+            else:
+                _session_playwright.stop()  # graceful stop untuk session sehat
             logger.info("Session browser closed.")
         except Exception as e:
             logger.debug(f"Error saat menutup session browser: {e}")
