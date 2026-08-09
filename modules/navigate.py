@@ -6,6 +6,28 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 from loguru import logger
 
 
+class PageCorruptedError(Exception):
+    """Objek page Playwright tidak valid lagi (renderer crash / target closed).
+    Pemanggil harus restart session browser untuk mendapat page baru yang sehat."""
+
+
+# Pola pesan error yang menandakan objek page/connection Playwright sudah rusak.
+_PAGE_CORRUPTION_MARKERS = (
+    "_object",            # 'dict' object has no attribute '_object'
+    "target closed",      # Target page, context or browser has been closed
+    "has been closed",
+    "connection closed",
+    "browser has been closed",
+    "crash",              # Page crashed
+)
+
+
+def is_page_corruption_error(exc: BaseException) -> bool:
+    """True jika exception menandakan objek page Playwright sudah tidak valid."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _PAGE_CORRUPTION_MARKERS)
+
+
 # Pusat Kota Bandung (sekitar Alun-alun) + zoom yang mencakup Bandung Raya.
 # Dipakai untuk memaksa viewport pencarian ke Bandung meski IP pengguna berada
 # di kota lain (mis. Jakarta) - mencegah Google fallback ke hasil sekitar IP.
@@ -60,6 +82,13 @@ def navigate_gmaps_search(page: Page, search_query: str, location_override: tupl
         except Exception as diag_err:
             logger.debug(f"Gagal menyimpan diagnosa navigasi: {diag_err}")
         raise timeout_err
+    except Exception as nav_err:
+        # Deteksi objek page Playwright yang rusak (renderer crash / target closed)
+        # -> sinyal ke caller untuk restart session, bukan sekadar skip query.
+        if is_page_corruption_error(nav_err):
+            logger.error(f"Objek page Playwright rusak (renderer crash): {nav_err}")
+            raise PageCorruptedError(str(nav_err)) from nav_err
+        raise
 
 
 def navigate_gmaps(page: Page, area_query: str):

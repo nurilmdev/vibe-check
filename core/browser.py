@@ -86,6 +86,12 @@ def get_page_with_session():
         page = context.pages[0]
     else:
         page = context.new_page()
+    
+    # 3. Timeout default 2 menit: mencegah operasi Playwright hang selamanya
+    # saat Google throttling / page tidak responsif. Setelah timeout, Playwright
+    # melempar TimeoutError yang tertangkap guard, loop lanjut, watchdog bisa restart.
+    page.set_default_timeout(120_000)
+    page.set_default_navigation_timeout(120_000)
         
     return page
 

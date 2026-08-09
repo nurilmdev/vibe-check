@@ -35,13 +35,14 @@ import argparse
 import csv
 import os
 import random
+import threading
 import time
 
 from loguru import logger
 
 from core.browser import get_page_with_session, close_browser, close_session_browser
 from core.logger import setup_logger
-from modules.navigate import navigate_gmaps_search, is_blocked_page, extract_place_details_from_page, BANDUNG_CENTER
+from modules.navigate import navigate_gmaps_search, is_blocked_page, extract_place_details_from_page, BANDUNG_CENTER, PageCorruptedError
 from modules.scrape_coffeeshops import scroll_place_feed
 from modules.scrape_umkm import (
     CSV_FIELDNAMES,
@@ -82,6 +83,43 @@ MAX_CONSECUTIVE_NAV_FAILURES = 3       # N kegagalan navigasi beruntun dianggap 
 MAX_BLOCK_EPISODES = 3                 # berhenti rapi setelah N episode blokir beruntun (cooldown berjenjang per episode)
 BROWSER_RESTART_INTERVAL = 100         # restart browser tiap N query selesai (memory hygiene)
 STUCK_THRESHOLD = 300                # detik tanpa progress -> restart session (anti-hang/throttling halus)
+WATCHDOG_INTERVAL = 30               # detik: seberapa sering watchdog memeriksa progress
+
+
+class _WatchdogState:
+    """State bersama antara main-thread dan watchdog-thread (thread-safe via lock)."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.last_progress = time.time()
+        self.force_restart = threading.Event()  # di-set watchdog bila stuck
+        self.stop = threading.Event()           # di-set main untuk menghentikan watchdog
+
+    def touch(self):
+        with self.lock:
+            self.last_progress = time.time()
+
+    def idle_seconds(self) -> float:
+        with self.lock:
+            return time.time() - self.last_progress
+
+
+def _watchdog_loop(state: _WatchdogState):
+    """
+    Background daemon: bangun tiap WATCHDOG_INTERVAL detik; bila main-thread tidak
+    mencatat progress > STUCK_THRESHOLD (termasuk hang DI TENGAH query/navigation),
+    set flag force_restart agar loop utama me-restart session di titik aman berikutnya.
+    Thread ini tetap hidup walau main-thread sedang 'hang' di dalam page.goto().
+    """
+    while not state.stop.is_set():
+        idle = state.idle_seconds()
+        if idle > STUCK_THRESHOLD and not state.force_restart.is_set():
+            logger.warning(
+                f"[watchdog] Tidak ada progress selama {idle/60:.1f} menit — "
+                "kemungkinan hang di tengah query. Menandai force_restart..."
+            )
+            state.force_restart.set()
+        state.stop.wait(WATCHDOG_INTERVAL)  # tidur, tapi bisa dibangunkan saat stop
+
 
 
 def build_queries() -> list:
@@ -202,6 +240,15 @@ def navigate_with_guard(page, query: str, nav_state: dict):
             nav_state["blocks"] = 0
             # Teruskan status navigate_gmaps_search: "results" -> "ok", "place" -> "place"
             return page, ("place" if result == "place" else "ok")
+        except PageCorruptedError as pce:
+            # Objek page rusak (renderer crash) -> session tidak bisa dipakai lagi.
+            # Restart session SEKARANG dan retry query yang sama dengan page baru.
+            logger.warning(f"[page-rusak] {pce}. Restart session browser lalu retry query...")
+            close_session_browser()
+            human_delay()
+            page = get_page_with_session()
+            nav_state["failures"] = 0
+            continue  # while loop -> retry query yang sama dengan page sehat
         except Exception as e:
             nav_state["failures"] += 1
             blocked = is_blocked_page(page)
@@ -319,7 +366,10 @@ def run_extraction(output_file=RAW_OUTPUT_FILE, max_per_query=None, max_queries=
     total_written = 0
     queries_done_this_run = 0
     nav_state = {"failures": 0, "blocks": 0}  # state guard anti-blokir (lihat navigate_with_guard)
-    last_progress_time = time.time()  # stuck detector: di-update tiap ada progress
+    # Watchdog thread independen: memantau progress & menandai force_restart bila hang
+    wd_state = _WatchdogState()
+    wd_thread = threading.Thread(target=_watchdog_loop, args=(wd_state,), daemon=True)
+    wd_thread.start()
 
     # APPEND mode: data lama aman; header hanya ditulis jika file baru/kosong
     with open(output_file, "a", newline="", encoding="utf-8-sig") as csv_file:
@@ -337,31 +387,32 @@ def run_extraction(output_file=RAW_OUTPUT_FILE, max_per_query=None, max_queries=
                 if query in completed_queries:
                     continue  # resume: skip query yang sudah selesai penuh
 
-                # --- Stuck detector: tidak ada progress > STUCK_THRESHOLD -> restart session ---
-                if time.time() - last_progress_time > STUCK_THRESHOLD:
+                # --- Watchdog: bila thread menandai force_restart (hang di tengah query), restart session ---
+                if wd_state.force_restart.is_set():
                     logger.warning(
-                        f"[stuck] Tidak ada progress selama {(time.time() - last_progress_time)/60:.1f} menit "
-                        "(kemungkinan throttling halus Google). Restart session browser..."
+                        f"[watchdog] Restart session karena tidak ada progress "
+                        f"{wd_state.idle_seconds()/60:.1f} menit. Melanjutkan..."
                     )
                     close_session_browser()
                     human_delay()
                     page = get_page_with_session()
-                    last_progress_time = time.time()
+                    wd_state.force_restart.clear()
+                    wd_state.touch()
 
                 logger.info(f"\n🔎 Scraping query {idx}/{total_queries}: {query}...")
                 page, nav_status = navigate_with_guard(page, query, nav_state)
                 if nav_status == "stop":
                     break  # berhenti rapi: checkpoint & CSV sudah tersimpan, tinggal resume
                 if nav_status == "retry":
-                    last_progress_time = time.time()  # ada respons (walau gagal) -> reset stuck timer
+                    wd_state.touch()  # ada respons (walau gagal) -> reset stuck timer
                     continue
-                last_progress_time = time.time()  # navigasi sukses -> reset stuck timer
+                wd_state.touch()  # navigasi sukses -> reset stuck timer
 
                 # --- Bonus capture: query niche -> Google redirect ke place page tunggal ---
                 if nav_status == "place":
                     try:
                         total_written += scrape_single_place(page, query, writer, csv_file, seen_urls)
-                        last_progress_time = time.time()  # reset stuck timer
+                        wd_state.touch()  # reset stuck timer
                     except Exception as e:
                         logger.error(f"❌ Bonus capture gagal untuk '{query}': {e}. Lanjut ke query berikutnya.")
                     mark_query_completed(query)
@@ -406,12 +457,21 @@ def run_extraction(output_file=RAW_OUTPUT_FILE, max_per_query=None, max_queries=
                         writer.writerow(row)
                         csv_file.flush()  # real-time save per record (append)
                         total_written += 1
-                        last_progress_time = time.time()  # progress nyata -> reset stuck timer
+                        wd_state.touch()  # progress nyata -> reset stuck timer
                         logger.info(
                             f"[{total_written}] 💾 {row['Name']} | 🏷️ {row['Category'] or '-'} "
                             f"| 💬 {row['Reviews_Count']} ulasan | 📞 {row['Phone_Number'] or '-'} "
                             f"| 🌐 {row['Website_URL'] or '-'}"
                         )
+                    except PageCorruptedError as pce:
+                        # Page rusak (renderer crash) -> restart session SEKARANG,
+                        # jangan lanjut dengan page yang rusak (akan hang selamanya).
+                        logger.error(f"[page-rusak] Gagal memproses '{card.get('name')}': {pce}. Restart session...")
+                        close_session_browser()
+                        human_delay()
+                        page = get_page_with_session()
+                        wd_state.touch()
+                        continue
                     except Exception as e:
                         logger.error(f"❌ Gagal memproses '{card.get('name')}': {e}. Lanjut ke tempat berikutnya.")
                         continue
@@ -432,6 +492,8 @@ def run_extraction(output_file=RAW_OUTPUT_FILE, max_per_query=None, max_queries=
 
                 human_delay()  # jeda antar query
         finally:
+            wd_state.stop.set()  # hentikan watchdog thread
+            wd_thread.join(timeout=5)
             close_session_browser()  # menutup context + browser + driver Playwright session
             close_browser()
 

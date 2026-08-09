@@ -37,7 +37,7 @@ from playwright.sync_api import Page
 
 from core.browser import get_page_with_session, close_browser
 from core.logger import setup_logger
-from modules.navigate import navigate_gmaps_search
+from modules.navigate import navigate_gmaps_search, PageCorruptedError, is_page_corruption_error
 from modules.scrape_coffeeshops import scroll_place_feed
 
 TARGET_QUERIES = [
@@ -152,6 +152,9 @@ def extract_place_contacts(page: Page, place_url: str) -> dict:
         page.goto(place_url, wait_until="domcontentloaded", timeout=120_000)  # 2 menit: toleran rate-limit
         page.wait_for_timeout(2500)  # beri waktu panel detail merender info kontak
     except Exception as e:
+        if is_page_corruption_error(e):
+            logger.error(f"Objek page rusak saat buka detail: {e}")
+            raise PageCorruptedError(str(e)) from e
         logger.warning(f"⚠️ Gagal membuka halaman detail ({place_url}): {e}")
         return contacts
 
